@@ -1042,11 +1042,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # === Профили резистентности ===
     if stack[-1] == "mm_resist":
         if text == "2024 пр резист":
-            await update.message.reply_document(document="https://disk.yandex.ru/i/0bnwY1XiGqPXcA")
+            link = "https://disk.yandex.ru/i/0bnwY1XiGqPXcA"
+            await update.message.reply_text(f"📄 Профили резистентности за 2024 г.:\n{link}")
         elif text == "2025 пр резист":
-            await update.message.reply_document(document="https://disk.yandex.ru/i/2Da4WudpqRGhZQ")
-        mk = ReplyKeyboardMarkup(build_menu(MM_RESIST_MENU), resize_keyboard=True)
-        await update.message.reply_text("Выберите год:", reply_markup=mk)
+            link = "https://disk.yandex.ru/i/2Da4WudpqRGhZQ"
+            await update.message.reply_text(f"📄 Профили резистентности за 2025 г.:\n{link}")
         return
 
     # === ESCAPE-патогены ===
@@ -1073,9 +1073,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Выберите тип консультирования:", reply_markup=mk)
             return
         elif text == "Информирование о проведении тестирования на ВИЧ-инфекцию":
-            await update.message.reply_document(document="https://disk.yandex.ru/i/rQc09SM2SO7Ydg")
+            link = "https://disk.yandex.ru/i/rQc09SM2SO7Ydg"
+            await update.message.reply_text(f"📄 Информирование о проведении тестирования на ВИЧ:\n{link}")
         elif text == "Журнал учета аварийных ситуаций":
-            await update.message.reply_document(document="https://disk.yandex.ru/i/0k83VIDOZ52VQw")
+            link = "https://disk.yandex.ru/i/0k83VIDOZ52VQw"
+            await update.message.reply_text(f"📄 Журнал учета аварийных ситуаций:\n{link}")
         elif text == "Мероприятия по снижению числа АС":
             await update.message.reply_photo(photo="https://disk.yandex.ru/i/mh_Z6sMi4yVGEA")
         else:
@@ -1126,7 +1128,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mk = ReplyKeyboardMarkup(build_menu(OOI_PERSONAL_MENU), resize_keyboard=True)
             await update.message.reply_text("Меры личной профилактики:", reply_markup=mk)
         elif text == "Забор биоматериала при подозрении на ООИ":
-            await update.message.reply_document(document="https://disk.yandex.ru/i/ObKRV28B61xbxA")
+            link = "https://disk.yandex.ru/d/CndmqGbpp21uaA"
+            await update.message.reply_text(f"📄 Забор биоматериала при подозрении на ООИ:\n{link}")
             mk = ReplyKeyboardMarkup(build_menu(OOI_MENU), resize_keyboard=True)
             await update.message.reply_text("Особо опасные инфекции:", reply_markup=mk)
         elif text == "Режимы обеззараживания поверхностей при ООИ":
@@ -1143,9 +1146,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if text == "Общий план мероприятий":
             await update.message.reply_photo(photo="https://disk.yandex.ru/i/rrQERzTebQHwvQ")
         elif text == "Первичные мероприятия":
-            await update.message.reply_document(document="https://disk.yandex.ru/i/ObKRV28B61xbxA")
-        mk = ReplyKeyboardMarkup(build_menu(OOI_MEASURES_MENU), resize_keyboard=True)
-        await update.message.reply_text("Противоэпидемические мероприятия:", reply_markup=mk)
+            link = "https://disk.yandex.ru/i/ObKRV28B61xbxA"
+            await update.message.reply_text(f"📄 Первичные мероприятия:\n{link}")
         return
 
     # === ООИ: СИЗ для ООИ ===
