@@ -2,6 +2,85 @@ import logging
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
+class HAI_Calculator:
+    """
+    Калькулятор ИСМП с нормативами только для Российской Федерации.
+    Обновлено: ОАРИТ, Хирургическое отделение, Общепрофильный стационар.
+    """
+
+    # Нормативы по РФ (верхняя граница допустимого)
+    NORMS_RU = {
+        "clabsi": {
+            "ОАРИТ": 3.0,
+            "Хирургическое отделение": 5.0,
+            "Общепрофильный стационар": 4.0,
+        },
+        "vap": {
+            "ОАРИТ": 10.0,
+            "Хирургическое отделение": 8.0,
+            "Общепрофильный стационар": 6.0,
+        },
+        "cauti": {
+            "ОАРИТ": 7.0,
+            "Хирургическое отделение": 6.0,
+            "Общепрофильный стационар": 5.0,
+        },
+        "ssi": {
+            "Аппендэктомия": 8.0,
+            "Колоректальные операции": 15.0,
+            "Протезирование сустава": 2.0,
+        },
+        "cdiff": 5.0,           # Россия (на 10 000 койко-дней)
+        "overall": 5.0,         # Общая частота ИСМП в РФ (ориентировочно)
+    }
+
+    @staticmethod
+    def clabsi_rate(cases: int, days: int) -> float:
+        return (cases / days) * 1000 if days > 0 else 0.0
+
+    @staticmethod
+    def vap_rate(cases: int, days: int) -> float:
+        return (cases / days) * 1000 if days > 0 else 0.0
+
+    @staticmethod
+    def cauti_rate(cases: int, days: int) -> float:
+        return (cases / days) * 1000 if days > 0 else 0.0
+
+    @staticmethod
+    def ssi_rate(cases: int, ops: int) -> float:
+        return (cases / ops) * 100 if ops > 0 else 0.0
+
+    @staticmethod
+    def c_diff_rate(cases: int, patient_days: int) -> float:
+        return (cases / patient_days) * 10000 if patient_days > 0 else 0.0
+
+    @staticmethod
+    def overall_hai_rate(total_hai_cases: int, total_admissions: int) -> float:
+        return (total_hai_cases / total_admissions) * 100 if total_admissions > 0 else 0.0
+
+    @classmethod
+    def interpret(cls, indicator: str, value: float, context: str = None) -> str:
+        """Интерпретация по нормативам РФ"""
+        if indicator in ("clabsi", "vap", "cauti"):
+            norm = cls.NORMS_RU[indicator].get(context)
+        elif indicator == "ssi":
+            norm = cls.NORMS_RU["ssi"].get(context)
+        elif indicator == "cdiff":
+            norm = cls.NORMS_RU["cdiff"]
+        elif indicator == "overall":
+            norm = cls.NORMS_RU["overall"]
+        else:
+            return "⚠️ Неизвестный показатель"
+
+        if norm is None:
+            return f"⚠️ Нет нормы для «{context}»"
+        if value <= norm:
+            unit = "%" if indicator in ("ssi", "overall") else ""
+            return f"🟢 В пределах нормы (≤ {norm}{unit})"
+        else:
+            unit = "%" if indicator in ("ssi", "overall") else ""
+            return f"🔴 Выше нормы (норма ≤ {norm}{unit})"
+
 # === Логирование ===
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
@@ -25,6 +104,7 @@ MAIN_MENU = [
     "Стратифицированные показатели",
     "Внутренний контроль",
     "Особо опасные инфекции",
+    "Протоколы АМТ",
 ]
 
 ISM_MENU = [
@@ -205,6 +285,95 @@ INFECT_MENU = [
     "Действия в случае выявления легионеллеза",
     "Действия при выявлении гнойно-воспалительных заболеваний",
 ]
+# === Протоколы АМТ ===
+AMT_MENU = [
+    "Инфекционный эндокардит",
+    "Инфекция кожи и мягких тканей",
+    "Энтероколит, вызванный Clostridioides difficille",
+    "Инфекция органов брюшной полости",
+    "Инфекция мочевыводящих путей",
+    "Инфекция органов малого таза",
+    "Нозокомиальная пневмония",
+    "Сепсис",
+    "Фибрильная нейтропения",
+    "Инвазивный кандидоз",
+    "Инфекция ЛОР-органов",
+]
+
+# === Гигиена рук ===
+HAND_HYGIENE_MENU = [
+    "Введение и значение гигиены рук",
+    "Пять ключевых моментов гигиены рук (по ВОЗ)",
+    "Методики и техники гигиены рук",
+    "Нормативно-правовая база",
+    "Обучение и контроль"
+]
+
+HAND_TECHNIQUES_MENU = [
+    "Гигиеническая обработка рук с мылом и водой / антисептиком",
+    "Хирургическая обработка рук"
+]
+
+# === Стратифицированные показатели ===
+STRAT_MENU = [
+    "Рассчитать ИК-ЦВК",
+    "Рассчитать ВАП",
+    "Рассчитать КА-ИМВП",
+    "Рассчитать ИОХВ",
+    "Рассчитать инфекцию, вызванную Clostridioides difficile",
+    "Рассчитать общую частоту ИСМП",
+]
+
+AMT_SUBMENU = ["Схема", "Дозировки"]
+AMT_ABD_MENU = ["Схема", "Эмпирическая терапия инвазивного микоза", "Дозировки"]
+
+AMT_IMAGES = {
+    "Инфекционный эндокардит": {
+        "Схема": "https://disk.yandex.ru/i/cOR6sTVnyGIDqQ",
+        "Дозировки": "https://disk.yandex.ru/i/sA58zTvNdLFWkg",
+    },
+    "Инфекция кожи и мягких тканей": {
+        "Схема": "https://disk.yandex.ru/i/o8z1AHFnmVZqUg",
+        "Дозировки": "https://disk.yandex.ru/i/26jcg2fv6Craqw",
+    },
+    "Энтероколит, вызванный Clostridioides difficille": {
+        "Схема": "https://disk.yandex.ru/i/g5gqxtFQRme4rA",
+        "Дозировки": "https://disk.yandex.ru/i/xk-HSXwQqYz-ZA",
+    },
+    "Инфекция органов брюшной полости": {
+        "Схема": "https://disk.yandex.ru/i/yFJ8nMl9iy_TGw",
+        "Эмпирическая терапия инвазивного микоза": "https://disk.yandex.ru/i/_unH6TWjt8FRHg",
+        "Дозировки": "https://disk.yandex.ru/i/hOk8WzAo8xvAGA",
+    },
+    "Инфекция мочевыводящих путей": {
+        "Схема": "https://disk.yandex.ru/i/gX1wgTfwGjwzvQ",
+        "Дозировки": "https://disk.yandex.ru/i/GJqNTd6EMpAacw",
+    },
+    "Инфекция органов малого таза": {
+        "Схема": "https://disk.yandex.ru/i/QyIlmnkK5UBqTA",
+        "Дозировки": "https://disk.yandex.ru/i/fSxAjFh1Wr8ujw",
+    },
+    "Нозокомиальная пневмония": {
+        "Схема": "https://disk.yandex.ru/i/yuq7sNfhmpyRew",
+        "Дозировки": "https://disk.yandex.ru/i/Jp1SSaLGWfaxKw",
+    },
+    "Сепсис": {
+        "Схема": "https://disk.yandex.ru/i/1Guo3RmdBTNuRQ",
+        "Дозировки": "https://disk.yandex.ru/i/MUttc5OhwEsnDg",
+    },
+    "Фибрильная нейтропения": {
+        "Схема": "https://disk.yandex.ru/i/x481dlDzDFXneg",
+        "Дозировки": "https://disk.yandex.ru/i/bebl7x4-K6wQNA",
+    },
+    "Инвазивный кандидоз": {
+        "Схема": "https://disk.yandex.ru/i/CDU-FVaI-rIsqg",
+        "Дозировки": "https://disk.yandex.ru/i/070K5T2Yzc-0bQ",
+    },
+    "Инфекция ЛОР-органов": {
+        "Схема": "https://disk.yandex.ru/i/ndGZstmEcgTE4Q",
+        "Дозировки": "https://disk.yandex.ru/i/RFoMjt4zQ6YKrw",
+    },
+}
 
 # === Клавиатура: по одной кнопке на строку ===
 def build_menu(buttons, back=True, home=True):
@@ -318,6 +487,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stack.append("infect_menu")
             mk = ReplyKeyboardMarkup(build_menu(INFECT_MENU), resize_keyboard=True)
             await update.message.reply_text("Выберите тип инфекции:", reply_markup=mk)
+        elif text == "Протоколы АМТ":
+            stack.append("amt_menu")
+            mk = ReplyKeyboardMarkup(build_menu(AMT_MENU), resize_keyboard=True)
+            await update.message.reply_text("Протоколы АМТ:", reply_markup=mk)
+        elif text == "Гигиена рук":
+            stack.append("hand_hygiene")
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text("Гигиена рук:", reply_markup=mk)
+        elif text == "Протоколы АМТ":
+            stack.append("amt_menu")
+            mk = ReplyKeyboardMarkup(build_menu(AMT_MENU), resize_keyboard=True)
+            await update.message.reply_text("Протоколы АМТ:", reply_markup=mk)
+        elif text == "Гигиена рук":
+            stack.append("hand_hygiene")
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text("Гигиена рук:", reply_markup=mk)
+        elif text == "Стратифицированные показатели":
+            stack.append("strat_menu")
+            mk = ReplyKeyboardMarkup(build_menu(STRAT_MENU), resize_keyboard=True)
+            await update.message.reply_text("Выберите показатель для расчёта:", reply_markup=mk)
         else:
             await update.message.reply_text("Раздел временно недоступен.")
         return
@@ -974,41 +1163,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "3. Выделение одного и того же микроорганизма из крови и из отделяемого из раны входного отверстия катетера (в случаи его наличия)."
             )
         }
-        mk = ReplyKeyboardMarkup(build_menu(IK_TYPES_MENU), resize_keyboard=True)
+        ReplyKeyboardMarkup(build_menu(IK_TYPES_MENU), resize_keyboard=True)
 
 
 # === Мероприятия при выявлении инфекционного больного (текстовые ссылки) ===
     if stack[-1] == "infect_menu":
         link_map = {
-        "Первичные противоэпидемические мероприятия": "https://disk.yandex.ru/i/s52xCqt_eZicCQ",
-        "Действия в случае выявления ВИЧ-инфекции у пациента": "https://disk.yandex.ru/i/MRp6KIj7zEhPuw",
-        "Действия при выявлении гепатита В и С у пациента": "https://disk.yandex.ru/i/8RQRRNAMmrxqfA",
-        "Действия в случае выявления туберкулеза у пациента": "https://disk.yandex.ru/i/qK-O_HfyAKIWgw",
-        "Действия в случае выявления сальмонеллеза у пациента": "https://disk.yandex.ru/i/xzvSV4e0LIK7OQ",
-        "Действия в случае выявления Гепатита А и Е": "https://disk.yandex.ru/i/zeZC8_IBi-LlSw",
-        "Противоэпидемические мероприятия против Грипп, ОРВИ, Covid-19": "https://disk.yandex.ru/i/kaD1_OMYU53XTA",
-        "Действия при выявлении кори, краснухи, эпидпаротита у пациента": "https://disk.yandex.ru/i/ekx5SOiq7B48ng",
-        "Действия при выявлении коклюша у пациента": "https://disk.yandex.ru/i/OiWzoU_SFpcFaw",
-        "Действия при выявлении дифтерии у пациента": "https://disk.yandex.ru/i/yDhq-ppTSgbC5Q",
-        "Действия в случае выявления менингококковой инфекции": "https://disk.yandex.ru/i/J1z98NuOvt23mg",
-        "Действия в случае выявления пневмонии у пациента": "https://disk.yandex.ru/i/lxszApbrFfSjSg",
-        "Действия при выявлении стрептококковой инфекции группы А у пациента": "https://disk.yandex.ru/i/4Zkp_KK3GJr6Fw",
-        "Действия в случае выявления легионеллеза": "https://disk.yandex.ru/i/VMtdtyH1GlGgvQ",
-        "Действия при выявлении гнойно-воспалительных заболеваний": "https://disk.yandex.ru/i/nCHBXX63VtqbeA",
-    }
-    if text in link_map:
-        await update.message.reply_text(f"📎 {text}:\n{link_map[text]}")
-    else:
-        await update.message.reply_text("Пункт не найден.")
+            "Первичные противоэпидемические мероприятия": "https://disk.yandex.ru/i/s52xCqt_eZicCQ",
+            "Действия в случае выявления ВИЧ-инфекции у пациента": "https://disk.yandex.ru/i/MRp6KIj7zEhPuw",
+            "Действия при выявлении гепатита В и С у пациента": "https://disk.yandex.ru/i/8RQRRNAMmrxqfA",
+            "Действия в случае выявления туберкулеза у пациента": "https://disk.yandex.ru/i/qK-O_HfyAKIWgw",
+            "Действия в случае выявления сальмонеллеза у пациента": "https://disk.yandex.ru/i/xzvSV4e0LIK7OQ",
+            "Действия в случае выявления Гепатита А и Е": "https://disk.yandex.ru/i/zeZC8_IBi-LlSw",
+            "Противоэпидемические мероприятия против Грипп, ОРВИ, Covid-19": "https://disk.yandex.ru/i/kaD1_OMYU53XTA",
+            "Действия при выявлении кори, краснухи, эпидпаротита у пациента": "https://disk.yandex.ru/i/ekx5SOiq7B48ng",
+            "Действия при выявлении коклюша у пациента": "https://disk.yandex.ru/i/OiWzoU_SFpcFaw",
+            "Действия при выявлении дифтерии у пациента": "https://disk.yandex.ru/i/yDhq-ppTSgbC5Q",
+            "Действия в случае выявления менингококковой инфекции": "https://disk.yandex.ru/i/J1z98NuOvt23mg",
+            "Действия в случае выявления пневмонии у пациента": "https://disk.yandex.ru/i/lxszApbrFfSjSg",
+            "Действия при выявлении стрептококковой инфекции группы А у пациента": "https://disk.yandex.ru/i/4Zkp_KK3GJr6Fw",
+            "Действия в случае выявления легионеллеза": "https://disk.yandex.ru/i/VMtdtyH1GlGgvQ",
+            "Действия при выявлении гнойно-воспалительных заболеваний": "https://disk.yandex.ru/i/nCHBXX63VtqbeA",
+        }
+        if text in link_map:
+            await update.message.reply_text(f"📎 {text}:\n{link_map[text]}")
+        else:
+            await update.message.reply_text("Пункт не найден.")
 
-    # Возврат в подменю
-    mk = ReplyKeyboardMarkup(build_menu(INFECT_MENU), resize_keyboard=True)
-    await update.message.reply_text("Выберите тип инфекции:", reply_markup=mk)
-    return
-
-    # === По умолчанию ===
-    await update.message.reply_text("Пожалуйста, используйте кнопки меню.")
-
+        mk = ReplyKeyboardMarkup(build_menu(INFECT_MENU), resize_keyboard=True)
+        await update.message.reply_text("Выберите тип инфекции:", reply_markup=mk)
+        return
 
     # === Микробиологический мониторинг ===
     if stack[-1] == "mm_menu":
@@ -1278,9 +1462,354 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Режимы обеззараживания:", reply_markup=mk)
         return
 
+    # === Протоколы АМТ: выбор заболевания ===
+    if stack[-1] == "amt_menu":
+        if text in AMT_IMAGES:
+            stack.append(f"amt_{text}")
+            if text == "Инфекция органов брюшной полости":
+                mk = ReplyKeyboardMarkup(build_menu(AMT_ABD_MENU), resize_keyboard=True)
+                await update.message.reply_text("Выберите раздел:", reply_markup=mk)
+            else:
+                mk = ReplyKeyboardMarkup(build_menu(AMT_SUBMENU), resize_keyboard=True)
+                await update.message.reply_text("Выберите раздел:", reply_markup=mk)
+        else:
+            mk = ReplyKeyboardMarkup(build_menu(AMT_MENU), resize_keyboard=True)
+            await update.message.reply_text("Пункт не найден.", reply_markup=mk)
+        return
+
+    # === Протоколы АМТ: отправка изображений ===
+    if stack[-1].startswith("amt_"):
+        disease = stack[-1][4:]  # убираем "amt_"
+        if disease in AMT_IMAGES and text in AMT_IMAGES[disease]:
+            photo_url = AMT_IMAGES[disease][text]
+            await update.message.reply_photo(photo=photo_url, caption=f"{disease} — {text}")
+        # Возврат к списку заболеваний после отправки
+        mk = ReplyKeyboardMarkup(build_menu(AMT_MENU), resize_keyboard=True)
+        await update.message.reply_text("Протоколы АМТ:", reply_markup=mk)
+        return
+    # === Гигиена рук ===
+    if stack[-1] == "hand_hygiene":
+        if text == "Введение и значение гигиены рук":
+            msg = (
+                "Почему гигиена рук — основа профилактики инфекций, связанных с оказанием медицинской помощи (ИСМП)\n\n"
+                "Гигиена рук является самой простой и эффективной мерой профилактики ИСМП. \n"
+                "Руки медицинского персонала — один из главных путей передачи патогенных микроорганизмов между пациентами, оборудованием и окружающей средой. Даже при визуально чистой коже на руках могут находиться болезнетворные бактерии (включая Staphylococcus aureus, Escherichia coli, Clostridioides difficile, а также мультирезистентные штаммы), которые легко передаются при контакте.\n\n"
+                "Своевременная и правильная гигиена рук позволяет:\n"
+                "● снизить риск передачи инфекций от пациента к пациенту;\n"
+                "● защитить самого медицинского работника;\n"
+                "● предотвратить вспышки внутрибольничных инфекций;\n"
+                "● сократить использование антибиотиков и замедлить развитие антибиотикорезистентности.\n\n"
+                "Всемирная организация здравоохранения (ВОЗ) называет гигиену рук «золотым стандартом» инфекционной безопасности в здравоохранении."
+            )
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await reply_safe(update, msg, mk)
+        elif text == "Пять ключевых моментов гигиены рук (по ВОЗ)":
+            msg = (
+                "● Перед контактом с пациентом\n"
+                "● Перед чистой/асептической процедурой\n"
+                "● После контакта с биологическими жидкостями\n"
+                "● После контакта с пациентом\n"
+                "● После контакта с окружающей пациента средой"
+            )
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text(msg, reply_markup=mk)
+        elif text == "Методики и техники гигиены рук":
+            stack.append("hand_techniques")
+            mk = ReplyKeyboardMarkup(build_menu(HAND_TECHNIQUES_MENU), resize_keyboard=True)
+            await update.message.reply_text("Выберите методику:", reply_markup=mk)
+            return
+        elif text == "Нормативно-правовая база":
+            msg = (
+                "1) МУ 3.5.1.3674-20 \"Обеззараживание рук медицинских работников и кожных покровов пациентов при оказании медицинской помощи\"\n"
+                "2) СанПиН 3.3686-21 \"Санитарно-эпидемиологические требования по профилактике инфекционных болезней\"\n"
+                "3) СОП-044-РН-СТ \"Гигиеническая обработка рук\"\n"
+                "4) СОП-045-РН-СТ \"Хирургическая обработка рук\""
+            )
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text(msg, reply_markup=mk)
+        elif text == "Обучение и контроль":
+            await update.message.reply_photo(photo="https://disk.yandex.ru/i/7JGcNBmtUmwJDg")
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text("Гигиена рук:", reply_markup=mk)
+        else:
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text("Пункт не найден.", reply_markup=mk)
+        return
+
+    # === Методики гигиены рук ===
+    if stack[-1] == "hand_techniques":
+        if text == "Гигиеническая обработка рук с мылом и водой / антисептиком":
+            await update.message.reply_text("📹 Гигиеническая обработка рук:\nhttps://disk.yandex.ru/i/K11JJQeKtHdrZA")
+        elif text == "Хирургическая обработка рук":
+            await update.message.reply_text("📹 Хирургическая обработка рук:\nhttps://disk.yandex.ru/i/PvnWfDPJYpDmIQ")
+        else:
+            mk = ReplyKeyboardMarkup(build_menu(HAND_TECHNIQUES_MENU), resize_keyboard=True)
+            await update.message.reply_text("Выберите методику:", reply_markup=mk)
+            return
+        # Возврат в меню методик после отправки видео
+        mk = ReplyKeyboardMarkup(build_menu(HAND_TECHNIQUES_MENU), resize_keyboard=True)
+        await update.message.reply_text("Выберите методику:", reply_markup=mk)
+        return
+
+    # === Протоколы АМТ ===
+    if stack[-1] == "amt_menu":
+        AMT_LINKS = {
+            "Инфекционный эндокардит": {
+                "Схема": "https://disk.yandex.ru/i/cOR6sTVnyGIDqQ",
+                "Дозировки": "https://disk.yandex.ru/i/sA58zTvNdLFWkg",
+            },
+            "Инфекция кожи и мягких тканей": {
+                "Схема": "https://disk.yandex.ru/i/o8z1AHFnmVZqUg",
+                "Дозировки": "https://disk.yandex.ru/i/26jcg2fv6Craqw",
+            },
+            "Энтероколит, вызванный Clostridioides difficille": {
+                "Схема": "https://disk.yandex.ru/i/g5gqxtFQRme4rA",
+                "Дозировки": "https://disk.yandex.ru/i/xk-HSXwQqYz-ZA",
+            },
+            "Инфекция органов брюшной полости": {
+                "Схема": "https://disk.yandex.ru/i/yFJ8nMl9iy_TGw",
+                "Эмпирическая терапия инвазивного микоза": "https://disk.yandex.ru/i/_unH6TWjt8FRHg",
+                "Дозировки": "https://disk.yandex.ru/i/hOk8WzAo8xvAGA",
+            },
+            "Инфекция мочевыводящих путей": {
+                "Схема": "https://disk.yandex.ru/i/gX1wgTfwGjwzvQ",
+                "Дозировки": "https://disk.yandex.ru/i/GJqNTd6EMpAacw",
+            },
+            "Инфекция органов малого таза": {
+                "Схема": "https://disk.yandex.ru/i/QyIlmnkK5UBqTA",
+                "Дозировки": "https://disk.yandex.ru/i/fSxAjFh1Wr8ujw",
+            },
+            "Нозокомиальная пневмония": {
+                "Схема": "https://disk.yandex.ru/i/yuq7sNfhmpyRew",
+                "Дозировки": "https://disk.yandex.ru/i/Jp1SSaLGWfaxKw",
+            },
+            "Сепсис": {
+                "Схема": "https://disk.yandex.ru/i/1Guo3RmdBTNuRQ",
+                "Дозировки": "https://disk.yandex.ru/i/MUttc5OhwEsnDg",
+            },
+            "Фибрильная нейтропения": {
+                "Схема": "https://disk.yandex.ru/i/x481dlDzDFXneg",
+                "Дозировки": "https://disk.yandex.ru/i/bebl7x4-K6wQNA",
+            },
+            "Инвазивный кандидоз": {
+                "Схема": "https://disk.yandex.ru/i/CDU-FVaI-rIsqg",
+                "Дозировки": "https://disk.yandex.ru/i/070K5T2Yzc-0bQ",
+            },
+            "Инфекция ЛОР-органов": {
+                "Схема": "https://disk.yandex.ru/i/ndGZstmEcgTE4Q",
+                "Дозировки": "https://disk.yandex.ru/i/RFoMjt4zQ6YKrw",
+            },
+        }
+        if text in AMT_LINKS:
+            stack.append(f"amt_{text}")
+            if text == "Инфекция органов брюшной полости":
+                mk = ReplyKeyboardMarkup(build_menu(AMT_ABD_MENU), resize_keyboard=True)
+                await update.message.reply_text("Выберите раздел:", reply_markup=mk)
+            else:
+                mk = ReplyKeyboardMarkup(build_menu(AMT_SUBMENU), resize_keyboard=True)
+                await update.message.reply_text("Выберите раздел:", reply_markup=mk)
+        else:
+            mk = ReplyKeyboardMarkup(build_menu(AMT_MENU), resize_keyboard=True)
+            await update.message.reply_text("Пункт не найден.", reply_markup=mk)
+        return
+
+    if stack[-1].startswith("amt_"):
+        disease = stack[-1][4:]
+        AMT_LINKS = { ... }  # тот же словарь, что выше — можно вынести глобально, но для простоты повторим
+        AMT_LINKS = {
+            "Инфекционный эндокардит": {"Схема": "https://disk.yandex.ru/i/cOR6sTVnyGIDqQ", "Дозировки": "https://disk.yandex.ru/i/sA58zTvNdLFWkg"},
+            "Инфекция кожи и мягких тканей": {"Схема": "https://disk.yandex.ru/i/o8z1AHFnmVZqUg", "Дозировки": "https://disk.yandex.ru/i/26jcg2fv6Craqw"},
+            "Энтероколит, вызванный Clostridioides difficille": {"Схема": "https://disk.yandex.ru/i/g5gqxtFQRme4rA", "Дозировки": "https://disk.yandex.ru/i/xk-HSXwQqYz-ZA"},
+            "Инфекция органов брюшной полости": {"Схема": "https://disk.yandex.ru/i/yFJ8nMl9iy_TGw", "Эмпирическая терапия инвазивного микоза": "https://disk.yandex.ru/i/_unH6TWjt8FRHg", "Дозировки": "https://disk.yandex.ru/i/hOk8WzAo8xvAGA"},
+            "Инфекция мочевыводящих путей": {"Схема": "https://disk.yandex.ru/i/gX1wgTfwGjwzvQ", "Дозировки": "https://disk.yandex.ru/i/GJqNTd6EMpAacw"},
+            "Инфекция органов малого таза": {"Схема": "https://disk.yandex.ru/i/QyIlmnkK5UBqTA", "Дозировки": "https://disk.yandex.ru/i/fSxAjFh1Wr8ujw"},
+            "Нозокомиальная пневмония": {"Схема": "https://disk.yandex.ru/i/yuq7sNfhmpyRew", "Дозировки": "https://disk.yandex.ru/i/Jp1SSaLGWfaxKw"},
+            "Сепсис": {"Схема": "https://disk.yandex.ru/i/1Guo3RmdBTNuRQ", "Дозировки": "https://disk.yandex.ru/i/MUttc5OhwEsnDg"},
+            "Фибрильная нейтропения": {"Схема": "https://disk.yandex.ru/i/x481dlDzDFXneg", "Дозировки": "https://disk.yandex.ru/i/bebl7x4-K6wQNA"},
+            "Инвазивный кандидоз": {"Схема": "https://disk.yandex.ru/i/CDU-FVaI-rIsqg", "Дозировки": "https://disk.yandex.ru/i/070K5T2Yzc-0bQ"},
+            "Инфекция ЛОР-органов": {"Схема": "https://disk.yandex.ru/i/ndGZstmEcgTE4Q", "Дозировки": "https://disk.yandex.ru/i/RFoMjt4zQ6YKrw"},
+        }
+        if disease in AMT_LINKS and text in AMT_LINKS[disease]:
+            link = AMT_LINKS[disease][text]
+            await update.message.reply_text(f"📎 {disease} — {text}:\n{link}")
+        mk = ReplyKeyboardMarkup(build_menu(AMT_MENU), resize_keyboard=True)
+        await update.message.reply_text("Протоколы АМТ:", reply_markup=mk)
+        return
+
+    # === Гигиена рук ===
+    if stack[-1] == "hand_hygiene":
+        if text == "Введение и значение гигиены рук":
+            msg = (
+                "Почему гигиена рук — основа профилактики инфекций, связанных с оказанием медицинской помощи (ИСМП)\n\n"
+                "Гигиена рук является самой простой и эффективной мерой профилактики ИСМП. \n"
+                "Руки медицинского персонала — один из главных путей передачи патогенных микроорганизмов между пациентами, оборудованием и окружающей средой. Даже при визуально чистой коже на руках могут находиться болезнетворные бактерии (включая Staphylococcus aureus, Escherichia coli, Clostridioides difficile, а также мультирезистентные штаммы), которые легко передаются при контакте.\n\n"
+                "Своевременная и правильная гигиена рук позволяет:\n"
+                "● снизить риск передачи инфекций от пациента к пациенту;\n"
+                "● защитить самого медицинского работника;\n"
+                "● предотвратить вспышки внутрибольничных инфекций;\n"
+                "● сократить использование антибиотиков и замедлить развитие антибиотикорезистентности.\n\n"
+                "Всемирная организация здравоохранения (ВОЗ) называет гигиену рук «золотым стандартом» инфекционной безопасности в здравоохранении."
+            )
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await reply_safe(update, msg, mk)
+        elif text == "Пять ключевых моментов гигиены рук (по ВОЗ)":
+            msg = (
+                "● Перед контактом с пациентом\n"
+                "● Перед чистой/асептической процедурой\n"
+                "● После контакта с биологическими жидкостями\n"
+                "● После контакта с пациентом\n"
+                "● После контакта с окружающей пациента средой"
+            )
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text(msg, reply_markup=mk)
+        elif text == "Методики и техники гигиены рук":
+            stack.append("hand_techniques")
+            mk = ReplyKeyboardMarkup(build_menu(HAND_TECHNIQUES_MENU), resize_keyboard=True)
+            await update.message.reply_text("Выберите методику:", reply_markup=mk)
+            return
+        elif text == "Нормативно-правовая база":
+            msg = (
+                "1) МУ 3.5.1.3674-20 \"Обеззараживание рук медицинских работников и кожных покровов пациентов при оказании медицинской помощи\"\n"
+                "2) СанПиН 3.3686-21 \"Санитарно-эпидемиологические требования по профилактике инфекционных болезней\"\n"
+                "3) СОП-044-РН-СТ \"Гигиеническая обработка рук\"\n"
+                "4) СОП-045-РН-СТ \"Хирургическая обработка рук\""
+            )
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text(msg, reply_markup=mk)
+        elif text == "Обучение и контроль":
+            await update.message.reply_text("📎 Обучение и контроль:\nhttps://disk.yandex.ru/i/7JGcNBmtUmwJDg")
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text("Гигиена рук:", reply_markup=mk)
+        else:
+            mk = ReplyKeyboardMarkup(build_menu(HAND_HYGIENE_MENU), resize_keyboard=True)
+            await update.message.reply_text("Пункт не найден.", reply_markup=mk)
+        return
+
+    if stack[-1] == "hand_techniques":
+        if text == "Гигиеническая обработка рук с мылом и водой / антисептиком":
+            await update.message.reply_text("📹 Видео: Гигиеническая обработка рук:\nhttps://disk.yandex.ru/i/K11JJQeKtHdrZA")
+        elif text == "Хирургическая обработка рук":
+            await update.message.reply_text("📹 Видео: Хирургическая обработка рук:\nhttps://disk.yandex.ru/i/PvnWfDPJYpDmIQ")
+        mk = ReplyKeyboardMarkup(build_menu(HAND_TECHNIQUES_MENU), resize_keyboard=True)
+        await update.message.reply_text("Выберите методику:", reply_markup=mk)
+        return
+
+    # === Стратифицированные показатели (только РФ) ===
+    if stack[-1] == "strat_menu":
+        if text == "Рассчитать ИК-ЦВК":
+            stack.append("clabsi_context")
+            mk = ReplyKeyboardMarkup(build_menu(["ОАРИТ", "Хирургическое отделение", "Общепрофильный стационар"]),
+                                     resize_keyboard=True)
+            await update.message.reply_text("Выберите подразделение:", reply_markup=mk)
+        elif text == "Рассчитать ВАП":
+            stack.append("vap_context")
+            mk = ReplyKeyboardMarkup(build_menu(["ОАРИТ", "Хирургическое отделение", "Общепрофильный стационар"]),
+                                     resize_keyboard=True)
+            await update.message.reply_text("Выберите подразделение:", reply_markup=mk)
+        elif text == "Рассчитать КА-ИМВП":
+            stack.append("cauti_context")
+            mk = ReplyKeyboardMarkup(build_menu(["ОАРИТ", "Хирургическое отделение", "Общепрофильный стационар"]),
+                                     resize_keyboard=True)
+            await update.message.reply_text("Выберите подразделение:", reply_markup=mk)
+        elif text == "Рассчитать ИОХВ":
+            stack.append("ssi_context")
+            types = list(HAI_Calculator.NORMS_RU["ssi"].keys())
+            mk = ReplyKeyboardMarkup(build_menu(types), resize_keyboard=True)
+            await update.message.reply_text("Выберите тип операции:", reply_markup=mk)
+        elif text == "Рассчитать инфекцию, вызванную Clostridioides difficile":
+            stack.append("cdiff_cases")
+            await update.message.reply_text("Введите число случаев инфекции, вызванной Clostridioides difficile:")
+        elif text == "Рассчитать общую частоту ИСМП":
+            stack.append("overall_cases")
+            await update.message.reply_text("Введите общее число случаев ИСМП:")
+        else:
+            mk = ReplyKeyboardMarkup(build_menu(STRAT_MENU), resize_keyboard=True)
+            await update.message.reply_text("Выберите показатель:", reply_markup=mk)
+        return
+
+    # === Ввод данных ===
+    if stack[-1].endswith("_context"):
+        user_data = context.user_data
+        user_data["hai_context"] = text
+        indicator = stack[-1].split("_")[0]
+        stack[-1] = f"{indicator}_cases"
+        await update.message.reply_text(f"Введите число новых случаев {indicator.upper()}:")
+        return
+
+    if stack[-1] in ["clabsi_cases", "vap_cases", "cauti_cases", "ssi_cases", "cdiff_cases", "overall_cases"]:
+        try:
+            cases = int(text)
+        except ValueError:
+            await update.message.reply_text("❗ Введите целое число.")
+            return
+        user_data = context.user_data
+        user_data["hai_cases"] = cases
+        desc_map = {
+            "clabsi_cases": "катетеро-дней ЦВК",
+            "vap_cases": "вентиляторо-дней",
+            "cauti_cases": "катетеро-дней мочевого катетера",
+            "ssi_cases": "операций",
+            "cdiff_cases": "койко-дней",
+            "overall_cases": "госпитализаций",
+        }
+        desc = desc_map.get(stack[-1], "единиц знаменателя")
+        await update.message.reply_text(f"Введите количество {desc}:")
+        stack[-1] = stack[-1].replace("_cases", "_days")
+        return
+
+    # === Расчёт и интерпретация ===
+    if stack[-1].endswith("_days"):
+        try:
+            denom = int(text)
+        except ValueError:
+            await update.message.reply_text("❗ Введите целое число.")
+            return
+
+        user_data = context.user_data
+        cases = user_data["hai_cases"]
+        context_name = user_data.get("hai_context")
+        calc = HAI_Calculator()
+        state = stack[-1]
+
+        if state == "clabsi_days":
+            rate = calc.clabsi_rate(cases, denom)
+            interpretation = calc.interpret("clabsi", rate, context_name)
+            msg = f"✅ ИК-ЦВК: {rate:.2f} на 1000 катетеро-дней\n{interpretation}"
+        elif state == "vap_days":
+            rate = calc.vap_rate(cases, denom)
+            interpretation = calc.interpret("vap", rate, context_name)
+            msg = f"✅ ВАП: {rate:.2f} на 1000 вентиляторо-дней\n{interpretation}"
+        elif state == "cauti_days":
+            rate = calc.cauti_rate(cases, denom)
+            interpretation = calc.interpret("cauti", rate, context_name)
+            msg = f"✅ КА-ИМВП: {rate:.2f} на 1000 катетеро-дней\n{interpretation}"
+        elif state == "ssi_days":
+            rate = calc.ssi_rate(cases, denom)
+            interpretation = calc.interpret("ssi", rate, context_name)
+            msg = f"✅ ИОХВ: {rate:.2f}%\n{interpretation}"
+        elif state == "cdiff_days":
+            rate = calc.c_diff_rate(cases, denom)
+            interpretation = calc.interpret("cdiff", rate)
+            msg = f"✅ Инфекция, вызванная Clostridioides difficile: {rate:.2f} на 10 000 койко-дней\n{interpretation}"
+        elif state == "overall_days":
+            rate = calc.overall_hai_rate(cases, denom)
+            interpretation = calc.interpret("overall", rate)
+            msg = f"✅ Общая частота ИСМП: {rate:.2f}% госпитализаций\n{interpretation}"
+        else:
+            msg = "Произошла ошибка."
+
+        await update.message.reply_text(msg)
+        mk = ReplyKeyboardMarkup(build_menu(STRAT_MENU), resize_keyboard=True)
+        await update.message.reply_text("Выберите показатель:", reply_markup=mk)
+        stack.pop()  # возврат в strat_menu
+        return
+
+    # === По умолчанию ===
+    await update.message.reply_text("Пожалуйста, используйте кнопки меню.")
+
 # === ЗАПУСК ===
 def main():
-    TOKEN = "8375816364:AAEJayebQrIrE1FxITjVQqaE-O3GfHWnjM0"
+    TOKEN = "8375816364:AAGC6Uy3-Q0Xg5IrQqDrtVXb8PQggsqTpxQ"
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
